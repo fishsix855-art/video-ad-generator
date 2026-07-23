@@ -1,4 +1,4 @@
-﻿# MoneyPrinterTurbo configuration example
+# MoneyPrinterTurbo configuration example
 
 log_level = "DEBUG"
 listen_host = "0.0.0.0"
