@@ -1,4 +1,4 @@
-﻿import math
+import math
 import os
 import re
 import socket
@@ -566,22 +566,6 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
 
 
 def get_video_materials(task_id, params, video_terms, audio_duration):
-    if params.video_source == "seedance":
-        logger.info("\n\n## generating video via Seedance API")
-        from app.services.material import SeedanceMaterialProvider
-        provider = SeedanceMaterialProvider()
-        prompt = str(params.video_script_prompt or params.video_subject).strip()
-        if not prompt:
-            _mark_task_failed(task_id, "materials", "no prompt for Seedance generation")
-            return None
-        try:
-            video_url = provider.generate_video(prompt, duration=5, ratio="16:9")
-            video_path = provider.download_video(video_url)
-            return [video_path]
-        except Exception as e:
-            _mark_task_failed(task_id, "materials", "Seedance: {}".format(str(e)))
-            return None
-    
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -1058,6 +1042,82 @@ def _schedule_cross_post(
     return None
 
 
+
+def _run_seedance_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
+    """Seedance 专用流水线：一条 prompt → Seedance 生成带配音视频 → 成品"""
+
+    prompt = str(params.video_script_prompt or params.video_subject or "").strip()
+    if not prompt:
+        return _mark_task_failed(task_id, "seedance", "empty prompt for Seedance generation")
+
+    if len(prompt) > 2000:
+        prompt = prompt[:2000]
+        logger.warning("Seedance prompt truncated to 2000 chars, task_id: {}".format(task_id))
+
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=10)
+
+    try:
+        from app.services.material import SeedanceMaterialProvider
+        provider = SeedanceMaterialProvider()
+
+        # 从提示词估算时长：按中文字数粗略估算（每秒约 4 个中文字）
+        chinese_chars = sum(1 for c in prompt if '\u4e00' <= c <= '\u9fff')
+        estimated_duration = max(4, min(12, params.video_clip_duration or chinese_chars // 4))
+        logger.info(
+            "Seedance: chinese_chars={}, estimated_duration={}s, task_id: {}".format(
+                chinese_chars, estimated_duration, task_id
+            )
+        )
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20,
+                             message="Seedance generating video...")
+
+        # 调用 Seedance，带音频生成
+        video_url = provider.generate_video(
+            prompt,
+            duration=estimated_duration,
+            ratio="9:16",
+            generate_audio=True,
+        )
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=60,
+                             message="Downloading video...")
+
+        video_path = provider.download_video(video_url)
+
+        import os
+        import shutil
+        # 复制视频到任务目录
+        task_dir = utils.task_dir(task_id)
+        final_path = os.path.join(task_dir, "final-1.mp4")
+        shutil.copy2(video_path, final_path)
+
+        sm.state.update_task(
+            task_id,
+            state=const.TASK_STATE_COMPLETE,
+            progress=100,
+            videos=[final_path],
+            combined_videos=[final_path],
+            script=prompt,
+            terms="",
+            audio_file="",
+            audio_duration=estimated_duration,
+            subtitle_path="",
+            materials=[final_path],
+            warnings=None,
+        )
+
+        logger.success(
+            "Seedance pipeline complete: task_id={}, duration={}s, path={}".format(
+                task_id, estimated_duration, final_path
+            )
+        )
+        return {"videos": [final_path]}
+
+    except Exception as e:
+        logger.exception("Seedance pipeline failed, task_id: {}".format(task_id))
+        return _mark_task_failed(task_id, "seedance", str(e))
+
 def _run_pipeline(
     task_id,
     params: VideoParams,
@@ -1065,6 +1125,9 @@ def _run_pipeline(
     voice_preview: dict | None = None,
 ):
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
+    # Seedance fast path: skip script/terms/audio, go directly to AI video generation
+    if params.video_source == "seedance":
+        return _run_seedance_pipeline(task_id, params, stop_at)
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
 
     # 只有完整成片流程需要视频配乐供应商。尽早阻止缺少 Key 的完整任务，避免

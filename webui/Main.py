@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 import html
 import json
 import math
@@ -4117,36 +4117,84 @@ def _render_quick_mode():
             with c2:
                 if st.button("跳过参考图 :fast_forward:", use_container_width=True):
                     st.session_state.quick_mode_refs = []
-                    st.session_state.quick_mode_step = "prompt"
+                    st.session_state.quick_mode_step = "duration"
                     st.session_state.quick_mode_prompt = ""
                     st.rerun()
             with c3:
-                if st.button(":sparkles: 生成提示词", use_container_width=True, type="primary"):
-                    if st.session_state.quick_mode_selected >= 0:
-                        idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-                        with st.spinner("DeepSeek 正在生成分镜提示词..."):
-                            try:
-                                has_ref = len(st.session_state.quick_mode_refs) > 0
-                                ref_desc = ""
-                                if has_ref:
-                                    names = [r["name"] for r in st.session_state.quick_mode_refs if r["name"]]
-                                    ref_desc = "、".join(names) if names else "参考图片"
-
-                                prompt = llm.generate_video_prompt(
-                                    activity_theme=st.session_state.get("quick_mode_input", ""),
-                                    video_script=idea.get("description", ""),
-                                    has_reference=has_ref,
-                                    ref_description=ref_desc,
-                                    style=st.session_state.quick_mode_style,
-                                    duration=8,
-                                    camera_fixed=has_ref,
-                                )
-                                st.session_state.quick_mode_prompt = prompt
-                                st.session_state.quick_mode_step = "prompt"
-                                st.rerun()
-                            except Exception as e:
-                                st.error("生成提示词失败: " + str(e))
+                if st.button("下一步：选择时长 :arrow_right:", use_container_width=True, type="primary"):
+                    st.session_state.quick_mode_step = "duration"
+                    st.session_state.quick_mode_prompt = ""
+                    st.rerun()
         # ============================================================
+
+        # ============================================================
+        # Step 4.5: Duration Selection
+        # ============================================================
+        elif st.session_state.quick_mode_step == "duration":
+            if st.session_state.quick_mode_selected >= 0:
+                idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
+                st.info("方案: **{}** | 风格: **{}**".format(
+                    idea.get("title", ""), st.session_state.quick_mode_style))
+
+            st.markdown("### 选择视频时长")
+
+            if "quick_mode_duration" not in st.session_state:
+                st.session_state.quick_mode_duration = 8
+
+            duration = st.slider(
+                "视频时长（秒）",
+                min_value=4,
+                max_value=12,
+                value=st.session_state.quick_mode_duration,
+                step=1,
+                help="Fast模型最大支持12秒",
+            )
+            st.session_state.quick_mode_duration = duration
+            st.markdown("当前: **{} 秒**".format(duration))
+
+            if st.session_state.quick_mode_prompt:
+                st.success("提示词已生成（{} 秒）".format(duration))
+                with st.expander("预览", expanded=False):
+                    st.code(st.session_state.quick_mode_prompt[:500], language=None)
+
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                if st.button(":arrow_left: 返回参考图", use_container_width=True):
+                    st.session_state.quick_mode_prompt = ""
+                    st.session_state.quick_mode_step = "reference"
+                    st.rerun()
+            with c2:
+                if not st.session_state.quick_mode_prompt:
+                    if st.button(":sparkles: 生成提示词", use_container_width=True, type="primary"):
+                        if st.session_state.quick_mode_selected >= 0:
+                            idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
+                            has_ref = len(st.session_state.quick_mode_refs) > 0
+                            ref_desc = ""
+                            if has_ref:
+                                names = [r["name"] for r in st.session_state.quick_mode_refs if r["name"]]
+                                ref_desc = "、".join(names) if names else "参考图片"
+                            with st.spinner("DeepSeek 正在生成 {} 秒分镜提示词...".format(duration)):
+                                try:
+                                    prompt = llm.generate_video_prompt(
+                                        activity_theme=st.session_state.get("quick_mode_input", ""),
+                                        video_script=idea.get("description", ""),
+                                        has_reference=has_ref,
+                                        ref_description=ref_desc,
+                                        style=st.session_state.quick_mode_style,
+                                        duration=duration,
+                                        camera_fixed=has_ref,
+                                    )
+                                    st.session_state.quick_mode_prompt = prompt
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error("生成提示词失败: " + str(e))
+            with c3:
+                if st.session_state.quick_mode_prompt:
+                    if st.button("编辑提示词 :arrow_right:", use_container_width=True, type="primary"):
+                        st.session_state.quick_mode_step = "prompt"
+                        st.rerun()
+            st.divider()
+
         # Step 5: Edit Prompt + Generate
         # ============================================================
         elif st.session_state.quick_mode_step == "prompt":
@@ -4205,8 +4253,9 @@ def _render_quick_mode():
                         "video_source": "seedance",
                         "video_script_prompt": final_prompt,
                         "voice_name": "zh-CN-XiaoxiaoNeural-Female",
-                        "video_aspect": "16:9",
+                        "video_aspect": "9:16",
                         "video_concat_mode": "random",
+                        "video_clip_duration": st.session_state.get("quick_mode_duration", 8),
                         "language": "zh-CN",
                     }
                     r = _req.post("http://127.0.0.1:8080/api/v1/videos", json=payload, timeout=30)
@@ -4240,7 +4289,7 @@ def _render_quick_mode():
                             st.session_state.quick_gen_task_id = None
                             st.rerun()
                     elif state < 0:
-                        st.error("生成失败: " + task.get("message", "未知错误"))
+                        st.error("生成失败: " + (task.get("error") or task.get("message") or "未知错误"))
                         if st.button(":arrow_left: 返回修改"):
                             st.session_state.quick_mode_step = "prompt"
                             st.rerun()

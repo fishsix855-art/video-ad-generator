@@ -501,23 +501,29 @@ class SeedanceMaterialProvider:
     def generate_video(
         self,
         prompt,
-        duration=5,
+        duration=8,
         ratio="9:16",
-        timeout_seconds=300,
+        timeout_seconds=600,
         poll_interval=5,
+        generate_audio=True,
     ):
         task_id_resp = self._client.content_generation.tasks.create(
             model=self._model,
             content=[{"type": "text", "text": prompt}],
             duration=duration,
             ratio=ratio,
+            generate_audio=generate_audio,
         )
         task_id = task_id_resp.id
-        logger.info("Seedance task submitted: {} (model: {})".format(task_id, self._model))
+        logger.info(
+            "Seedance task submitted: {} (model: {}, duration: {}s, audio: {})".format(
+                task_id, self._model, duration, generate_audio
+            )
+        )
 
+        import time
         waited = 0
         while waited < timeout_seconds:
-            import time
             time.sleep(poll_interval)
             waited += poll_interval
             task = self._client.content_generation.tasks.get(task_id=task_id)
@@ -525,11 +531,15 @@ class SeedanceMaterialProvider:
 
             if task.status == "succeeded":
                 video_url = task.content.video_url
-                logger.info("Seedance video generated: {}".format(video_url[:80]))
+                logger.info("Seedance video generated ({}s), url: {}".format(
+                    getattr(task, "duration", "?"), video_url[:80]
+                ))
                 return video_url
             elif task.status == "failed":
                 error_msg = task.error.message if task.error else "unknown error"
-                raise RuntimeError("Seedance task {} failed: {}".format(task_id, error_msg))
+                raise RuntimeError(
+                    "Seedance task {} failed: {}".format(task_id, error_msg)
+                )
 
         raise TimeoutError(
             "Seedance task {} timed out after {}s".format(task_id, timeout_seconds)
