@@ -1,31 +1,30 @@
-﻿log_level = "DEBUG"
-listen_host = "0.0.0.0"
+# MoneyPrinterTurbo configuration
+# Copy this file to config.toml and fill in your API keys
+
+log_level = DEBUG
+listen_host = 0.0.0.0
 listen_port = 8080
 
 [app]
-video_source = "local"
-llm_provider = "deepseek"
-
-# == 以下需要填写你自己的 API Key ==
-deepseek_api_key = "你的DeepSeek API Key"
-deepseek_base_url = ""
-deepseek_model_name = ""
-
-volcengine_api_key = "你的火山引擎ARK API Key"
-volcengine_model_name = "doubao-seedance-1-0-pro-fast-251015"
-
-ffmpeg_path = "ffmpeg"
+llm_provider = deepseek
+deepseek_api_key = "
+deepseek_base_url = "
+deepseek_model_name = "
+volcengine_api_key = "
+volcengine_model_name = doubao-seedance-1-0-pro-fast-251015
+video_source = local
+ffmpeg_path = ffmpeg
 
 [whisper]
-model_size = "large-v3"
-device = "cpu"
-compute_type = "int8"
+model_size = large-v3
+device = cpu
+compute_type = int8
 
 [proxy]
 
 [azure]
-speech_key = ""
-speech_region = ""
+speech_key = "
+speech_region = "
 
 [ui]
 hide_log = false
