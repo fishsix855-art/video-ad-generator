@@ -1,44 +1,41 @@
 # AI Video Ad Generator
 
-A one-click AI video ad generator for telecom retail stores. Built on [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) with Seedance video generation and DeepSeek creative AI.
+One-click AI video ad generator for telecom stores. Powered by Seedance video generation and DeepSeek creative AI.
 
-## Features
+## Quick Deploy (2 steps)
 
-- **One-click video generation**: Input a promotion description, AI generates creative scripts, storyboard prompts, and final videos
-- **Seedance video generation**: AI-generated video footage via Volcano Engine ARK
-- **DeepSeek creative engine**: Generates 6 creative concepts with different styles
-- **Scene templates**: Quick-start with common telecom promotion templates
-- **Reference image upload**: Upload store photos for consistent branding
-- **Download & restyle**: Download videos or regenerate with a different style
+### Step 1: Deploy on Streamlit Cloud
 
-## Quick Deploy on Railway
+1. Go to https://streamlit.io/cloud
+2. Click **Sign in with GitHub**
+3. Click **New app** (top right)
+4. Select repo: ishsix855-art/video-ad-generator
+5. Branch: master
+6. Main file path: webui/quick_app.py
+7. Click **Deploy!**
 
-1. Fork this repo
-2. Go to [Railway](https://railway.app) and login with GitHub
-3. Click **New Project** -> **Deploy from GitHub repo** -> Select this repo
-4. Add these environment variables in Railway:
-   - DEEPSEEK_API_KEY - Your DeepSeek API key
-   - VOLCENGINE_API_KEY - Your Volcano Engine ARK API key
-   - VOLCENGINE_MODEL_NAME - Seedance model (default: doubao-seedance-1-0-pro-fast-251015)
-5. Deploy!
+### Step 2: Add API Keys
+
+In your app's settings on Streamlit Cloud, go to **Secrets** and add:
+
+`	oml
+DEEPSEEK_API_KEY = sk-your-key
+VOLCENGINE_API_KEY = ark-your-key
+VOLCENGINE_MODEL_NAME = doubao-seedance-1-0-pro-fast-251015
+`
+
+Click **Save** and the app will reboot. Done!
 
 ## Local Development
 
 `ash
 pip install -r requirements.txt
-
-# Create config.toml with your API keys
 cp config.toml.example config.toml
-# Edit config.toml with your keys
-
-# Start servers
-python start_servers.py
+# Edit config.toml with your API keys
+streamlit run webui/quick_app.py
 `
 
 ## Tech Stack
 
-- **Frontend**: Streamlit
-- **Backend**: FastAPI
-- **Video Generation**: Volcano Engine Seedance API
-- **Creative AI**: DeepSeek
-- **Original Base**: MoneyPrinterTurbo
+- Streamlit + Seedance API + DeepSeek
+- Based on MoneyPrinterTurbo
