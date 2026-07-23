@@ -1,4 +1,4 @@
-import os, sys, time
+import os, sys, time, tempfile, shutil
 
 _root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 if _root not in sys.path:
@@ -7,8 +7,6 @@ if _root not in sys.path:
 import streamlit as st
 from app.services import llm
 
-# API base URL (auto-detect: local dev or deployment)
-API_BASE = os.environ.get("API_BASE_URL", "http://127.0.0.1:8080")
 
 st.set_page_config(page_title="AI Video", page_icon="", layout="centered", initial_sidebar_state="collapsed")
 
