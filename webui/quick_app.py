@@ -6,6 +6,15 @@ if _root not in sys.path:
 
 import streamlit as st
 from app.services import llm
+# Streamlit Cloud secrets support
+if hasattr(st, "secrets"):
+    import os as _os
+    for _key in ["DEEPSEEK_API_KEY", "VOLCENGINE_API_KEY", "VOLCENGINE_MODEL_NAME"]:
+        try:
+            _val = st.secrets[_key]
+            if _val: _os.environ[_key] = _val
+        except Exception:
+            pass
 
 
 st.set_page_config(page_title="AI Video", page_icon="", layout="centered", initial_sidebar_state="collapsed")
