@@ -1,14 +1,32 @@
-import os, sys, time, tempfile, shutil
+import os, sys, time, tempfile, shutil, uuid, yaml
 
 _root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+# Load feature flags from config/app.yaml
+def _load_features():
+    yaml_path = os.path.join(_root, 'config', 'app.yaml')
+    if os.path.exists(yaml_path):
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            try:
+                import yaml
+                cfg = yaml.safe_load(f)
+                return cfg.get('features', {})
+            except Exception:
+                pass
+    return {}
+
+_features = _load_features()
+
 import streamlit as st
 from app.services import llm
 # Streamlit Cloud secrets support
+API_BASE = "http://127.0.0.1:8080"
+
 if hasattr(st, "secrets"):
     import os as _os
+
     for _key in ["DEEPSEEK_API_KEY", "VOLCENGINE_API_KEY", "VOLCENGINE_MODEL_NAME"]:
         try:
             _val = st.secrets[_key]
@@ -17,14 +35,14 @@ if hasattr(st, "secrets"):
             pass
 
 
-st.set_page_config(page_title="AI Video", page_icon="", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="AI Video", page_icon="", layout="centered", initial_sidebar_state="expanded")
 
 # ═══════════════════════════════════════════════════════════════
 # CSS
 # ═══════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-    #MainMenu, footer, header[data-testid="stHeader"] {visibility: hidden;}
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header[data-testid="stHeader"] {background: transparent !important;}
 
     .stApp { background: linear-gradient(180deg, #fafbfc 0%, #f0f2f5 100%); }
 
@@ -172,6 +190,76 @@ for _k, _v in _defaults.items():
 # ═══════════════════════════════════════════════════════════════
 import os as _os
 
+
+
+# Sidebar tab navigation
+tab = st.sidebar.radio("导航", ["快速生成", "历史记录"], key="main_tab")
+
+if tab == "历史记录":
+    st.markdown('<div class="logo-reveal" style="text-align:center;padding:30px 0 10px 0"><h2 style="font-size:1.5rem;color:#0f172a;font-weight:700">历史记录</h2><p style="color:#94a3b8;font-size:0.8rem">类似对话记录，点击查看详情</p></div>', unsafe_allow_html=True)
+    sqlite_on = _features.get("sqlite_enabled", False)
+    if not sqlite_on:
+        st.warning("历史记录功能尚未开启。请在 config/app.yaml 中设置 sqlite_enabled: true")
+    else:
+        try:
+            from app.services import database
+            tasks = database.list_tasks(limit=50)
+            if not tasks:
+                st.info("暂无历史记录，生成视频后会自动保存于此")
+            else:
+                # Chat-style history list
+                for t in tasks:
+                    created = t.get("created_at", "")[:16]
+                    user_input = t.get("user_input", "")
+                    style = t.get("style", "无")
+                    status = t.get("status", "")
+                    status_icon = "" if status == "completed" else ""
+                    with st.expander(f"{status_icon} {created}  |  {user_input[:25]}...  |  {style}", expanded=False):
+                        task_detail = database.get_task(t["id"])
+                        if task_detail:
+                            idea = task_detail.get("creative_idea", {})
+                            if isinstance(idea, str):
+                                try: import json; idea = json.loads(idea)
+                                except: idea = {}
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.caption("状态")
+                                st.markdown(f"**{status}**")
+                                st.caption("时长")
+                                st.markdown(f"**{task_detail.get('duration','?')}s**")
+                            with c2:
+                                st.caption("风格")
+                                st.markdown(f"**{style}**")
+                                st.caption("任务ID")
+                                st.caption(t["id"][:8] + "...")
+                            if idea and isinstance(idea, dict):
+                                st.markdown("---")
+                                st.markdown(f"**{idea.get('title','')}**")
+                                st.caption(idea.get("description",""))
+                            final_prompt = task_detail.get("final_prompt", "") or task_detail.get("prompt", "")
+                            if final_prompt:
+                                with st.expander("查看提示词", expanded=False):
+                                    st.text_area("", value=final_prompt, height=200, disabled=True, key=f"hist_prompt_{t['id']}")
+                            # Show video if available
+                            video_urls = task_detail.get("video_urls", [])
+                            if not video_urls and task_detail.get("task_data"):
+                                try:
+                                    td = task_detail["task_data"]
+                                    if isinstance(td, str):
+                                        import json; td = json.loads(td)
+                                    video_urls = td.get("video_urls", [])
+                                except:
+                                    pass
+                            if video_urls:
+                                st.markdown("---")
+                                st.caption("生成的视频")
+                                for vi, vurl in enumerate(video_urls):
+                                    st.video(vurl)
+        except Exception as e:
+            st.error(f"加载失败: {e}")
+    st.stop()
+
+
 if st.session_state.quick_mode_step == "input":
     # Scene templates
     templates = [
@@ -198,6 +286,54 @@ if st.session_state.quick_mode_step == "input":
         if st.button("生成创意方案", use_container_width=True, type="primary", disabled=not quick_input):
             with st.spinner("DeepSeek 正在生成 6 个创意方案..."):
                 try:
+                    agent_on = _features.get("agent_enabled", False)
+                    if agent_on:
+                        try:
+                            from app.services import agent as _ag, evaluator as _eval
+                            from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+                            import json as _json
+                            # Pass API key directly - bypass agent.py config dependency
+                            import os as _os
+                            if not _os.environ.get("DEEPSEEK_API_KEY"):
+                                try:
+                                    from app.config import config as _cfg
+                                    _key = _cfg.app.get("deepseek_api_key","")
+                                    if _key: _os.environ["DEEPSEEK_API_KEY"] = _key
+                                except: pass
+                            system_prompt = """你是电信营业厅 AI 视频广告创意总监。搜索历史优秀案例，生成6个创意方案，自评质量。返回JSON数组。[{title, style, description}]"""
+                            agent_result = _ag.run_agent(system_prompt=system_prompt, user_message=f"活动：{quick_input}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS)
+                            answer = agent_result.get("answer","")
+                            # Clean markdown code blocks
+                            if "```" in answer:
+                                answer = answer.split("```")[1]
+                                if answer.startswith("json"):
+                                    answer = answer[4:]
+                                answer = answer.strip()
+                            # Extract JSON array
+                            ideas = []
+                            try:
+                                raw_ideas = _json.loads(answer) if answer.startswith("[") else _json.loads("[" + answer + "]") if answer.startswith("{") else []
+                                # Normalize: ensure each idea has title, description, style
+                                for ri in raw_ideas:
+                                    if isinstance(ri, dict) and "title" in ri:
+                                        ideas.append({
+                                            "title": ri.get("title", ""),
+                                            "description": ri.get("description", ""),
+                                            "style": ri.get("style", "")
+                                        })
+                            except Exception:
+                                ideas = []
+                            if isinstance(ideas, list) and len(ideas) >= 3:
+                                st.session_state.quick_mode_ideas = ideas[:6]
+                                st.session_state.quick_mode_agent_steps = agent_result.get("steps",[])
+                                st.session_state.quick_mode_step = "choose"; st.session_state.quick_mode_selected = -1
+                                st.rerun()
+                            else:
+                                raise ValueError("Agent output not valid JSON")
+                        except Exception as _agent_err:
+                            import traceback as _tb
+                            st.warning("Agent 模式失败: " + str(_agent_err)[:200])
+                            st.caption(_tb.format_exc()[-400:])
                     ideas = llm.generate_creative_ideas(quick_input)
                     st.session_state.quick_mode_ideas = ideas
                     st.session_state.quick_mode_step = "choose"; st.session_state.quick_mode_selected = -1
@@ -324,12 +460,40 @@ elif st.session_state.quick_mode_step == "duration":
                         ref_desc="、".join(names) if names else "参考图片"
                     with st.spinner(f"DeepSeek 正在生成 {duration} 秒分镜提示词..."):
                         try:
+                            agent_on = _features.get("agent_enabled", False)
+                            if agent_on:
+                                try:
+                                    from app.services import agent as _ag, evaluator as _ev
+                                    from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+                                    ref_rule = ""
+                                    cam_rule = "固定机位，全程完全静止，无推拉摇移" if has_ref else "可根据内容适度运镜"
+                                    if has_ref:
+                                        ref_rule = f"参考图优先，严格保持参考图中所有特征不变。参考图：{ref_desc or '用户提供'}"
+                                    sys_p = f"""你是专业AI视频提示词工程师。生成Seedance模型的分镜级视频prompt。
+检索历史案例，生成分镜提示词，自评质量。{ref_rule} 机位：{cam_rule}
+输出：【场景总描述】【视频总时长：{duration}秒，9:16竖屏】【时间分段动作脚本】【画质收尾】
+要求：至少4个时间切片，不少于300字，高清，画面稳定，无肢体畸形"""
+                                    ag_r = _ag.run_agent(system_prompt=sys_p, user_message=f"活动：{st.session_state.get('quick_mode_input','')}\n方案：{idea.get('description','')}\n风格：{st.session_state.quick_mode_style}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS)
+                                    ag_prompt = ag_r.get("answer","").strip()
+                                    ev_r = _ev.evaluate_prompt_quality(ag_prompt)
+                                    if ag_prompt and len(ag_prompt) > 100:
+                                        st.session_state.quick_mode_prompt = ag_prompt
+                                        st.session_state.quick_mode_prompt_agent_steps = ag_r.get("steps",[])
+                                        st.session_state.quick_mode_evaluation = ev_r
+                                        st.rerun()
+                                    else:
+                                        raise ValueError("Agent output too short")
+                                except Exception as _agent_err2:
+                                    import traceback as _tb2
+                                    st.warning("Agent 提示词失败: " + str(_agent_err2)[:200])
+                                    st.caption(_tb2.format_exc()[-400:])
                             prompt = llm.generate_video_prompt(
                                 activity_theme=st.session_state.get("quick_mode_input",""),
                                 video_script=idea.get("description",""),
                                 has_reference=has_ref, ref_description=ref_desc,
                                 style=st.session_state.quick_mode_style, duration=duration, camera_fixed=has_ref)
-                            st.session_state.quick_mode_prompt = prompt; st.rerun()
+                            st.session_state.quick_mode_prompt = prompt
+                            st.rerun()
                         except Exception as e: st.error("生成提示词失败: "+str(e))
     with c3:
         if st.session_state.quick_mode_prompt:
@@ -339,11 +503,28 @@ elif st.session_state.quick_mode_step == "duration":
 elif st.session_state.quick_mode_step == "prompt":
     if st.session_state.quick_mode_selected>=0:
         idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-        st.info(f"方案: **{idea.get('title','')}** | 风格: **{st.session_state.quick_mode_style}**")
     if not st.session_state.quick_mode_prompt:
         st.warning("提示词尚未生成，请返回上一步")
         if st.button("返回"): st.session_state.quick_mode_step="duration"; st.rerun()
     else:
+        # Show Agent reasoning and evaluation
+        agent_prompt_steps = st.session_state.get("quick_mode_prompt_agent_steps", [])
+        eval_result = st.session_state.get("quick_mode_evaluation", {})
+        if agent_prompt_steps:
+            with st.expander("查看 AI 推理过程与评测", expanded=False):
+                for s in agent_prompt_steps:
+                    tool_name = s.get("tool", "unknown")
+                    if tool_name:
+                        st.caption(f"Step {s['step']}: 调用 {tool_name}")
+                        if s.get("result"):
+                            st.text(str(s["result"])[:300])
+                if eval_result:
+                    passed = eval_result.get("passed", False)
+                    score = eval_result.get("score", 0)
+                    st.metric("质量评分", f"{score}", delta="通过" if passed else "未通过")
+                    if eval_result.get("issues"):
+                        for issue in eval_result["issues"]:
+                            st.caption(f"- {issue}")
         st.markdown("### 视频分镜提示词（可编辑）")
         edited = st.text_area("提示词",value=st.session_state.quick_mode_prompt,height=350,key="quick_mode_edited_prompt",label_visibility="collapsed")
         c1,c2,c3=st.columns([1,1,1])
@@ -368,7 +549,11 @@ elif st.session_state.quick_mode_step == "generating":
                 "video_source":"seedance","video_script_prompt":final_prompt,
                 "video_aspect":"9:16","video_concat_mode":"random",
                 "video_clip_duration":st.session_state.get("quick_mode_duration",8),"language":"zh-CN"},timeout=30)
-            st.session_state.quick_gen_task_id = r.json()["data"]["task_id"]; st.rerun()
+            resp = r.json()
+            task_data = resp.get("data", {})
+            if isinstance(task_data, list) and len(task_data) > 0:
+                task_data = task_data[0]
+            st.session_state.quick_gen_task_id = task_data.get("task_id", ""); st.rerun()
         except Exception as e:
             st.error("提交任务失败: "+str(e))
             if st.button("返回修改"): st.session_state.quick_mode_step="prompt"; st.rerun()
@@ -387,6 +572,30 @@ elif st.session_state.quick_mode_step == "generating":
                     # Download button
                     download_url = f"{API_BASE}/download/{tid}/final-{idx}.mp4"
                     st.markdown(f'<a href="{download_url}" download style="text-decoration:none"><button style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer">下载视频</button></a>', unsafe_allow_html=True)
+                # Save to SQLite (after all videos displayed)
+                try:
+                    if _features.get("sqlite_enabled", False):
+                        from app.services import database
+                        video_urls = []
+                        for vidx, vv in enumerate(task.get("videos", []), 1):
+                            video_urls.append(f"{API_BASE}/tasks/{tid}/final-{vidx}.mp4")
+                        task_record = {
+                            "id": tid,
+                            "user_input": st.session_state.get("quick_mode_input", ""),
+                            "creative_idea": st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected] if st.session_state.quick_mode_selected >= 0 and st.session_state.quick_mode_ideas else {},
+                            "style": st.session_state.get("quick_mode_style", ""),
+                            "duration": st.session_state.get("quick_mode_duration", 8),
+                            "prompt": st.session_state.get("quick_mode_prompt", ""),
+                            "final_prompt": final_prompt,
+                            "status": "completed",
+                            "video_urls": video_urls,
+                        }
+                        database.save_task(task_record)
+                        import logging
+                        logging.getLogger(__name__).info(f"Task {tid} saved to SQLite with {len(video_urls)} videos")
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to save task to SQLite: {e}")
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     if st.button("重新生成",key="gen_restart"):
