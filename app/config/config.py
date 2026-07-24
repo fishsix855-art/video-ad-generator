@@ -237,6 +237,20 @@ def load_config():
         with open(config_file, mode="r", encoding="utf-8-sig") as fp:
             _cfg_content = fp.read()
             _config_ = toml.loads(_cfg_content)
+    # Environment variable overrides (for Railway/cloud deployment)
+    _env_map = {
+        "deepseek_api_key": os.environ.get("DEEPSEEK_API_KEY"),
+        "deepseek_base_url": os.environ.get("DEEPSEEK_BASE_URL"),
+        "volcengine_api_key": os.environ.get("VOLCENGINE_API_KEY"),
+        "volcengine_model_name": os.environ.get("VOLCENGINE_MODEL_NAME"),
+        "llm_provider": os.environ.get("LLM_PROVIDER"),
+    }
+    _app_section = _config_.get("app", {})
+    for _k, _v in _env_map.items():
+        if _v:
+            _app_section[_k] = _v
+    _config_["app"] = _app_section
+
     return _config_
 
 

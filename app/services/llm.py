@@ -579,6 +579,154 @@ def generate_video_prompt(
     if response.startswith("Error:"):
         raise ValueError(response.removeprefix("Error:").strip())
     return response.strip()
+
+def generate_creative_ideas_with_agent(video_subject: str, language: str = "zh-CN") -> dict:
+    """
+    Agent 增强版创意方案生成。
+    利用 Agent 多步推理：分析关键词 → 检索历史案例 → 生成 → 自评 → 重试。
+    
+    Returns:
+        {"ideas": list[dict], "steps": list[dict], "success": bool}
+    """
+    import json as _json
+    from app.services import agent, evaluator
+    from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+    from app.services import skill_manager
+    
+    system_prompt = """你是电信营业厅 AI 视频广告创意总监。
+你的任务是：分析用户输入的活动描述，搜索历史优秀案例作为参考，生成 6 个创意方案，然后自评质量。如果不达标就重试。
+
+工作流程：
+1. 用 search_relevant_cases 搜索相关历史案例
+2. 根据历史案例和用户输入，生成 6 个创意方案（JSON 格式）
+3. 用 evaluate_prompt_quality 评测生成结果（把方案转成文本评测）
+4. 如果不达标，分析原因并重新生成
+5. 达标后输出最终 JSON
+
+输出要求：
+- 返回严格合法的 JSON 数组，每个元素包含 title、style、description
+- 6 个方案风格必须各不相同
+- 面向电信营业厅场景（套餐推广、新机发布、优惠活动等）
+- 描述要具体，包含画面元素和情感基调"""
+
+    user_message = f"活动描述：{video_subject}\n请按流程生成 6 个创意方案。"
+    
+    result = agent.run_agent(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=TOOL_DEFINITIONS,
+        tool_handlers=TOOL_HANDLERS,
+    )
+    
+    # Try to parse the answer as JSON
+    answer = result.get("answer", "")
+    try:
+        # Clean markdown code blocks
+        cleaned = answer.strip()
+        if "```" in cleaned:
+            lines = cleaned.split("\n")
+            cleaned = "\n".join([l for l in lines if not l.startswith("```")])
+        ideas = _json.loads(cleaned)
+        if isinstance(ideas, list) and len(ideas) > 0:
+            # Evaluate
+            eval_result = evaluator.evaluate_creative_ideas(ideas)
+            return {
+                "ideas": ideas[:6],
+                "steps": result.get("steps", []),
+                "success": True,
+                "evaluation": eval_result,
+            }
+    except (_json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Agent creative ideas parse failed: {e}")
+    
+    # Fallback: try to extract JSON from the answer
+    try:
+        start = answer.find("[")
+        end = answer.rfind("]") + 1
+        if start >= 0 and end > start:
+            ideas = _json.loads(answer[start:end])
+            if isinstance(ideas, list) and len(ideas) > 0:
+                return {
+                    "ideas": ideas[:6],
+                    "steps": result.get("steps", []),
+                    "success": True,
+                    "evaluation": evaluator.evaluate_creative_ideas(ideas),
+                }
+    except Exception:
+        pass
+    
+    return {"ideas": [], "steps": result.get("steps", []), "success": False, "error": "Failed to parse Agent output"}
+
+
+def generate_video_prompt_with_agent(
+    activity_theme: str = "",
+    video_script: str = "",
+    style: str = "写实商业广告",
+    duration: int = 8,
+    has_reference: bool = False,
+    ref_description: str = "",
+    camera_fixed: bool = True,
+) -> dict:
+    """
+    Agent 增强版视频提示词生成。
+    Agent 流程：检索历史 → 生成分镜 → 自评质量 → 不达标重试。
+    
+    Returns:
+        {"prompt": str, "steps": list[dict], "success": bool, "evaluation": dict}
+    """
+    from app.services import agent, evaluator
+    from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+    
+    ref_rule = ""
+    camera_rule = "固定机位，全程完全静止，无推拉摇移" if camera_fixed else "可根据内容适度运镜"
+    if has_reference:
+        ref_rule = f"参考图优先，严格保持参考图中所有特征不变。参考图内容：{ref_description or '用户提供的参考图片'}"
+    
+    system_prompt = f"""你是专业 AI 视频提示词工程师，专门输出适配 Seedance 视频生成模型的完整视频 prompt。
+
+工作流程：
+1. 用 search_relevant_cases 搜索相关历史优秀案例
+2. 根据历史经验和用户输入，生成分镜级视频提示词
+3. 用 evaluate_prompt_quality 自评质量
+4. 不达标则分析原因并重试，最多重试 2 次
+5. 达标后输出最终提示词
+
+输出要求：
+- 视频比例固定 9:16 竖屏
+- 严格按照【0.0-X.X秒】时间切片划分，至少 4 个时间段
+- 提示词总长度不少于 300 字
+- 高清，画面稳定，动作自然流畅，无肢体畸形
+- 如果存在人物/IP，全程保持形象统一
+- {ref_rule}
+- 机位要求：{camera_rule}
+
+按此结构输出：
+【场景总描述】
+【视频总时长：{duration}秒，9:16竖屏】
+【时间分段动作脚本】
+【画质收尾】"""
+
+    user_message = f"""活动主题：{activity_theme}
+创意方案：{video_script}
+视频风格：{style}
+视频时长：{duration} 秒"""
+
+    result = agent.run_agent(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=TOOL_DEFINITIONS,
+        tool_handlers=TOOL_HANDLERS,
+    )
+    
+    answer = result.get("answer", "").strip()
+    eval_result = evaluator.evaluate_prompt_quality(answer)
+    
+    return {
+        "prompt": answer,
+        "steps": result.get("steps", []),
+        "success": result.get("success", False) and eval_result["passed"],
+        "evaluation": eval_result,
+    }
 def _limit_script_text(text: str | None, max_length: int, field_name: str) -> str:
     value = (text or "").strip()
     if len(value) <= max_length:

@@ -1,0 +1,21 @@
+﻿# Agent 和增强功能的开关配置
+# 改造期间全部设为 false，验证通过后才逐步打开
+features:
+  agent_enabled: true
+  sqlite_enabled: true
+  skill_system_enabled: false
+
+# SQLite 数据库路径
+database:
+  path: storage/tasks.db
+
+# Agent 推理参数
+agent:
+  max_steps: 5
+  llm_timeout: 30
+
+# Prompt 质量评测规则
+evaluation:
+  min_time_slices: 4
+  min_prompt_length: 300
+  max_retry: 3
