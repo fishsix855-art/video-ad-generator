@@ -694,21 +694,37 @@ elif st.session_state.quick_mode_step == "generating":
 elif st.session_state.quick_mode_step == "feedback":
     fb = st.session_state.get("quick_feedback", "")
     st.info(f"Agent processing: {fb}")
-    fb_lower = fb.lower()
     
-    if any(kw in fb_lower for kw in ["subtitle", "subtitles", "caption"]):
-        st.success("Subtitle request received. Whisper/FFmpeg pipeline will process.")
-    if any(kw in fb_lower for kw in ["trim", "cut", "remove", "delete", "crop"]):
-        st.success("Video trim request received. FFmpeg will process.")
-    if any(kw in fb_lower for kw in ["style", "restyle", "change style"]):
+    with st.spinner("Agent is analyzing your feedback..."):
+        context = {
+            "style": st.session_state.get("quick_mode_style", ""),
+            "duration": st.session_state.get("quick_mode_duration", 8),
+            "prompt": st.session_state.get("quick_mode_prompt", ""),
+        }
+        fb_result = llm.process_feedback_with_agent(fb, context)
+    
+    action = fb_result.get("action", "done")
+    reply = fb_result.get("reply", "")
+    steps = fb_result.get("steps", [])
+    
+    if steps:
+        with st.expander("Agent reasoning (" + str(len(steps)) + " steps)", expanded=False):
+            for s in steps:
+                st.caption("Step " + str(s.get("step", "?")) + ": " + str(s.get("tool", "thinking")))
+    
+    st.success(reply)
+    
+    if action == "restyle":
         st.session_state.quick_mode_step = "style"
         st.session_state.quick_mode_prompt = ""
         st.session_state.quick_gen_task_id = None
         st.rerun()
-    if any(kw in fb_lower for kw in ["bright", "dark", "light", "color", "tone"]):
+    elif action == "regen_prompt":
         st.session_state.quick_mode_step = "prompt"
         st.session_state.quick_mode_prompt = ""
         st.rerun()
+    elif action in ["add_subtitle", "trim_video", "concat_videos"]:
+        st.info(f"Post-production action: {action} (pipeline will process)")
     
     if st.button("Back to video"):
         st.session_state.quick_mode_step = "generating"

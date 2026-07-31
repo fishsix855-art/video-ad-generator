@@ -729,6 +729,63 @@ def generate_video_prompt_with_agent(
         "success": result.get("success", False) and eval_result["passed"],
         "evaluation": eval_result,
     }
+
+def process_feedback_with_agent(feedback: str, context: dict = None) -> dict:
+    """Agent-driven user feedback processing. Agent interprets natural language feedback and decides actions."""
+    from app.services import agent
+    from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+    
+    ctx = context or {}
+    style = ctx.get("style", "")
+    duration = ctx.get("duration", 8)
+    prompt = ctx.get("prompt", "")
+    
+    system_prompt = f"""You are a video post-production assistant. User has generated a video and wants adjustments.
+Current: style={style}, duration={duration}s, prompt={prompt[:200]}
+
+Analyze the user feedback and decide ONE action:
+- done: acknowledge, nothing to do
+- restyle: user wants a different visual style
+- regen_prompt: user wants to modify/regenerate the prompt
+- add_subtitle: user wants subtitles
+- trim_video: user wants to trim/cut video
+- concat_videos: user wants to combine videos
+
+Output ONLY JSON: {{"action": "xxx", "reply": "short Chinese confirmation"}}"""
+
+    result = agent.run_agent(
+        system_prompt=system_prompt,
+        user_message=f"User feedback: {feedback}",
+        tools=TOOL_DEFINITIONS,
+        tool_handlers=TOOL_HANDLERS,
+        max_steps=3,
+    )
+    
+    answer = result.get("answer", "").strip()
+    import json as _json
+    try:
+        if "```" in answer:
+            answer = answer.split("```")[1]
+            if answer.startswith("json"):
+                answer = answer[4:]
+            answer = answer.strip()
+        parsed = _json.loads(answer)
+        return {"success": True, "action": parsed.get("action", "done"), 
+                "reply": parsed.get("reply", ""), "steps": result.get("steps", [])}
+    except Exception:
+        fb_lower = feedback.lower()
+        action = "done"
+        reply = "Got it."
+        if any(kw in fb_lower for kw in ["subtitle", "caption", "subtitles"]):
+            action = "add_subtitle"; reply = "Will add subtitles."
+        elif any(kw in fb_lower for kw in ["trim", "cut", "remove", "delete"]):
+            action = "trim_video"; reply = "Will trim."
+        elif any(kw in fb_lower for kw in ["style", "restyle"]):
+            action = "restyle"; reply = "Let us pick a new style."
+        elif any(kw in fb_lower for kw in ["prompt", "regenerate"]):
+            action = "regen_prompt"; reply = "Will regenerate prompt."
+        return {"success": True, "action": action, "reply": reply, "steps": []}
+
 def _limit_script_text(text: str | None, max_length: int, field_name: str) -> str:
     value = (text or "").strip()
     if len(value) <= max_length:
