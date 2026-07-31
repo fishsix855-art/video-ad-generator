@@ -748,7 +748,45 @@ elif st.session_state.quick_mode_step == "feedback":
         st.session_state.quick_mode_prompt = ""
         st.rerun()
     elif action in ["add_subtitle", "trim_video", "concat_videos"]:
-        st.info(f"Post-production action: {action} (pipeline will process)")
+        tid = st.session_state.get("quick_gen_task_id", "")
+        if tid:
+            import os as _os
+            task_dir_local = _os.path.join(_root, "storage", "tasks", tid)
+            video_path = _os.path.join(task_dir_local, "final-1.mp4")
+            if action == "add_subtitle":
+                with st.spinner("Generating subtitles via Whisper..."):
+                    try:
+                        from app.services.subtitle_generator import add_subtitle_to_video
+                        sub_out = _os.path.join(task_dir_local, "final-1_subtitled.mp4")
+                        result = add_subtitle_to_video(video_path, sub_out)
+                        if result.get("success"):
+                            st.success("Subtitle added! Refreshing...")
+                            st.session_state.quick_gen_task_id = tid
+                            time.sleep(1); st.rerun()
+                        else:
+                            st.error("Subtitle failed: " + str(result.get("error", "unknown")))
+                    except Exception as e:
+                        st.error("Subtitle generation failed: " + str(e))
+            elif action == "trim_video":
+                trim_start = fb_result.get("start", 0)
+                trim_end = fb_result.get("end", -1)
+                with st.spinner(f"Trimming video (start={trim_start}s)..."):
+                    try:
+                        from app.services.video_editor import VideoEditor
+                        editor = VideoEditor()
+                        trim_out = _os.path.join(task_dir_local, "final-1_trimmed.mp4")
+                        if trim_end > 0:
+                            editor.trim(video_path, trim_out, trim_start, trim_end)
+                        else:
+                            editor.trim(video_path, trim_out, trim_start)
+                        st.success("Video trimmed! Refreshing...")
+                        time.sleep(1); st.rerun()
+                    except Exception as e:
+                        st.error("Trim failed: " + str(e))
+            elif action == "concat_videos":
+                st.info("Concat action received. Multi-video concat requires additional setup.")
+        else:
+            st.warning("No active task found for post-production.")
     
     if st.button("Back to video"):
         st.session_state.quick_mode_step = "generating"

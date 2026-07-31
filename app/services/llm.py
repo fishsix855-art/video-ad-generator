@@ -751,11 +751,13 @@ Analyze the user feedback and decide ONE action:
 - done: acknowledge, nothing to do
 - restyle: user wants a different visual style
 - regen_prompt: user wants to modify/regenerate the prompt
-- add_subtitle: user wants subtitles
-- trim_video: user wants to trim/cut video
+- add_subtitle: user wants subtitles (auto-generate SRT + overlay)
+- trim_video: user wants to trim/cut video (include start and end seconds)
 - concat_videos: user wants to combine videos
 
-Output ONLY JSON: {{"action": "xxx", "reply": "short Chinese confirmation"}}"""
+Output ONLY JSON. For trim_video include start/end:
+{{"action": "trim_video", "reply": "short Chinese confirmation", "start": 2.0, "end": 10.0}}\nFor others:
+{{"action": "xxx", "reply": "short Chinese confirmation"}}"""
 
     result = agent.run_agent(
         system_prompt=system_prompt,
