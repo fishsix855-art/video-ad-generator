@@ -318,8 +318,8 @@ if tab == "历史记录":
 
 
 _save_progress("");  # auto-save on every render
-_steps_order = ["input", "choose", "style", "reference", "duration", "prompt", "generating", "feedback"]
-_step_labels = ["输入", "选方案", "选风格", "参考图", "时长", "提示词", "生成", "完成"]
+_steps_order = ["input", "choose", "confirm", "prompt", "generating", "feedback"]
+_step_labels = ["输入", "选方案", "确认配置", "提示词", "生成视频", "完成"]
 _cur = _steps_order.index(st.session_state.quick_mode_step) if st.session_state.quick_mode_step in _steps_order else 0
 _html = '<div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">'
 for _si, _sl in enumerate(_step_labels):
@@ -450,44 +450,32 @@ elif st.session_state.quick_mode_step == "choose":
                 </div>""", unsafe_allow_html=True)
                 if st.button("选择此方案", key=f"sel_{idx}", use_container_width=True):
                     st.session_state.quick_mode_selected = idx
-                    st.session_state.quick_mode_step = "style"; _save_progress("choosing_style"); st.rerun()
+                    st.session_state.quick_mode_step = "confirm"; st.session_state.quick_mode_prompt = ""; st.session_state.quick_mode_style = "写实商业广告"; _save_progress("confirming"); st.rerun()
     if st.button("返回修改描述"):
         st.session_state.quick_mode_step = "input"; st.session_state.quick_mode_ideas = []; st.rerun()
 
-elif st.session_state.quick_mode_step == "style":
+elif st.session_state.quick_mode_step == "confirm":
+    # v4.0: Unified confirm step - style + reference + duration + prompt
     if st.session_state.quick_mode_selected >= 0:
         idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-        st.info(f"已选方案: **{idea.get('title','')}**")
-    st.markdown("### 选择视频风格")
-    styles = [("","写实商业广告","明亮干净的商业场景"),("","温馨治愈","柔光、暖色调、治愈感"),("","科技未来感","霓虹灯效、赛博朋克"),("","动漫二次元","二次元角色、卡通渲染"),("","国风古韵","水墨意境、中式美学"),("","时尚快消","明快节奏、潮流配色")]
-    for row_start in range(0,6,3):
-        cols = st.columns(3)
-        for ci in range(3):
-            idx = row_start+ci
-            if idx>=6: break
-            emoji,name,desc = styles[idx]
-            selected = st.session_state.quick_mode_style == name
-            stagger = (idx%3)+1
-            cls = "style-card-selected" if selected else "style-card"
-            with cols[ci]:
-                st.markdown(f"""<div class="{cls} content-stagger-{stagger}">
-                    <div style="font-size:32px">{emoji}</div>
-                    <div style="font-weight:700;font-size:14px;margin-top:6px;color:#0f172a">{name}</div>
-                    <div style="font-size:11px;color:#94a3b8;margin-top:3px">{desc}</div>
-                </div>""", unsafe_allow_html=True)
-                if st.button("选择",key=f"sty_{idx}",use_container_width=True,disabled=selected):
-                    st.session_state.quick_mode_style = name; st.rerun()
-    c1,c2 = st.columns(2)
-    with c1:
-        if st.button("返回选创意", use_container_width=True): st.session_state.quick_mode_step = "choose"; st.rerun()
-    with c2:
-        if st.button("下一步：添加参考图", use_container_width=True, type="primary", disabled=not st.session_state.quick_mode_style):
-            st.session_state.quick_mode_step = "reference"; _save_progress("choosing_reference"); st.rerun()
+        st.info(f"方案: **{idea.get('title','')}**")
 
-elif st.session_state.quick_mode_step == "reference":
-    if st.session_state.quick_mode_selected >= 0:
-        idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-        st.info(f"方案: **{idea.get('title','')}** | 风格: **{st.session_state.quick_mode_style}**")
+    # --- Row 1: Style selection ---
+    st.markdown("### 视频风格")
+    styles = [("写实商业广告","明亮干净的商业场景"),("温馨治愈","柔光、暖色调、治愈感"),("科技未来感","霓虹灯效、赛博朋克"),("动漫二次元","二次元角色、卡通渲染"),("国风古韵","水墨意境、中式美学"),("时尚快消","明快节奏、潮流配色")]
+    style_names = [s[0] for s in styles]
+    current_style = st.session_state.get("quick_mode_style", "写实商业广告")
+    if current_style not in style_names:
+        current_style = style_names[0]
+    selected_style = st.selectbox("选择风格", style_names, index=style_names.index(current_style), key="confirm_style_select")
+    if selected_style != st.session_state.quick_mode_style:
+        st.session_state.quick_mode_style = selected_style
+        st.session_state.quick_mode_prompt = ""
+        st.rerun()
+
+    st.divider()
+
+    # --- Row 2: Reference image ---
     st.markdown("### 参考图（可选）")
     st.caption("上传门店照片、产品图等，AI 会根据图片名称生成对应的提示词")
     refs = st.session_state.quick_mode_refs
@@ -497,101 +485,105 @@ elif st.session_state.quick_mode_step == "reference":
             c1,c2,c3=st.columns([2,5,1])
             with c1: st.markdown(f"**{ref.get('name','未命名')}**")
             with c2:
-                if ref.get("path"): st.caption(ref["path"].split("\\")[-1][:40])
+                if ref.get("path"): st.caption(ref["path"].split(chr(92))[-1][:40])
             with c3:
                 if st.button("",key=f"del_ref_{ri}",help="删除"): st.session_state.quick_mode_refs.pop(ri); st.rerun()
     with st.popover("+ 添加参考图", use_container_width=False):
-        ref_name = st.text_input("图片名称", placeholder="例如：电信营业厅门店照片", key="new_ref_name")
-        ref_file = st.file_uploader("选择图片", type=["jpg","jpeg","png","webp"], key="new_ref_file", label_visibility="collapsed")
+        ref_name = st.text_input("图片名称", placeholder="例如：电信营业厅门店照片", key="new_ref_name_c")
+        ref_file = st.file_uploader("选择图片", type=["jpg","jpeg","png","webp"], key="new_ref_file_c", label_visibility="collapsed")
         if ref_file and ref_name:
-            if st.button("保存", use_container_width=True, type="primary", key="save_ref_btn"):
+            if st.button("保存", use_container_width=True, type="primary", key="save_ref_btn_c"):
                 save_dir = _os.path.join("storage","references")
                 _os.makedirs(save_dir, exist_ok=True)
                 save_path = _os.path.join(save_dir, ref_file.name)
                 with open(save_path,"wb") as f: f.write(ref_file.getbuffer())
                 st.session_state.quick_mode_refs.append({"name":ref_name,"path":save_path}); st.rerun()
-    st.divider()
-    c1,c2,c3=st.columns([1,1,1])
-    with c1:
-        if st.button("返回选风格",use_container_width=True): st.session_state.quick_mode_step="style"; st.rerun()
-    with c2:
-        if st.button("跳过参考图",use_container_width=True):
-            st.session_state.quick_mode_refs=[]; st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; _save_progress("setting_duration"); st.rerun()
-    with c3:
-        if st.button("下一步：选择时长",use_container_width=True,type="primary"):
-            st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; _save_progress("setting_duration"); st.rerun()
 
-elif st.session_state.quick_mode_step == "duration":
-    if st.session_state.quick_mode_selected>=0:
-        idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-        st.info(f"方案: **{idea.get('title','')}** | 风格: **{st.session_state.quick_mode_style}**")
-    st.markdown("### 选择视频时长")
-    duration = st.slider("视频时长（秒）",4,12,st.session_state.quick_mode_duration,1,help="最大 12 秒")
+    st.divider()
+
+    # --- Row 3: Duration ---
+    st.markdown("### 视频时长")
+    duration = st.slider("时长（秒）", 4, 15, value=st.session_state.get("quick_mode_duration", 8), step=1, key="confirm_duration")
     st.session_state.quick_mode_duration = duration
-    if st.session_state.quick_mode_prompt:
-        st.success(f"提示词已生成（{duration} 秒）")
-        with st.expander("预览",expanded=False): st.code(st.session_state.quick_mode_prompt[:500])
-    c1,c2,c3=st.columns([1,1,1])
-    with c1:
-        if st.button("返回参考图",use_container_width=True): st.session_state.quick_mode_prompt=""; st.session_state.quick_mode_step="reference"; st.rerun()
-    with c2:
-        if not st.session_state.quick_mode_prompt:
-            if st.button("生成提示词",use_container_width=True,type="primary"):
-                if st.session_state.quick_mode_selected>=0:
-                    idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
-                    has_ref = len(st.session_state.quick_mode_refs)>0
-                    ref_desc=""
-                    if has_ref:
-                        names=[r["name"] for r in st.session_state.quick_mode_refs if r["name"]]
-                        ref_desc="、".join(names) if names else "参考图片"
-                    with st.spinner(f"DeepSeek 正在生成 {duration} 秒分镜提示词..."):
-                        try:
-                            agent_on = _features.get("agent_enabled", False)
-                            if agent_on:
-                                try:
-                                    from app.services import agent as _ag, evaluator as _ev
-                                    from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
-                                    ref_rule = ""
-                                    cam_rule = "固定机位，全程完全静止，无推拉摇移" if has_ref else "可根据内容适度运镜"
-                                    if has_ref:
-                                        ref_rule = f"参考图优先，严格保持参考图中所有特征不变。参考图：{ref_desc or '用户提供'}"
-                                    sys_p = f"""你是专业AI视频提示词工程师。生成Seedance模型的分镜级视频prompt。
+
+    st.divider()
+
+    # --- Row 4: Prompt generation ---
+    has_ref = len(st.session_state.quick_mode_refs) > 0
+    ref_desc = ""
+    if has_ref:
+        names = [r["name"] for r in st.session_state.quick_mode_refs if r["name"]]
+        ref_desc = "、".join(names) if names else "参考图片"
+
+    if not st.session_state.quick_mode_prompt:
+        if st.button("生成提示词", use_container_width=True, type="primary"):
+            if st.session_state.quick_mode_selected >= 0:
+                idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
+                with st.spinner(f"DeepSeek 正在生成 {duration} 秒分镜提示词..."):
+                    try:
+                        agent_on = _features.get("agent_enabled", False)
+                        if agent_on:
+                            try:
+                                from app.services import agent as _ag, evaluator as _ev
+                                from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+                                ref_rule = ""
+                                cam_rule = "固定机位，全程完全静止，无推拉摇移" if has_ref else "可根据内容适度运镜"
+                                if has_ref:
+                                    ref_rule = f"参考图优先，严格保持参考图中所有特征不变。参考图：{ref_desc or '用户提供'}"
+                                sys_p = f"""你是专业AI视频提示词工程师。生成Seedance模型的分镜级视频prompt。
 检索历史案例，生成分镜提示词，自评质量。{ref_rule} 机位：{cam_rule}
 输出：【场景总描述】【视频总时长：{duration}秒，9:16竖屏】【时间分段动作脚本】【画质收尾】
 要求：至少4个时间切片，不少于300字，高清，画面稳定，无肢体畸形"""
-                                    ag_r = _ag.run_agent(system_prompt=sys_p, user_message=f"活动：{st.session_state.get('quick_mode_input','')}\n方案：{idea.get('description','')}\n风格：{st.session_state.quick_mode_style}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS, session_id=st.session_state.get("quick_mode_session_id", ""))
-                                    ag_prompt = ag_r.get("answer","").strip()
-                                    ev_r = _ev.evaluate_prompt_quality(ag_prompt)
-                                    if ag_prompt and len(ag_prompt) > 100:
-                                        st.session_state.quick_mode_prompt = ag_prompt
-                                        st.session_state.quick_mode_prompt_agent_steps = ag_r.get("steps",[])
-                                        st.session_state.quick_mode_evaluation = ev_r
-                                        st.rerun()
-                                    else:
-                                        raise ValueError("Agent output too short")
-                                except Exception as _agent_err2:
-                                    import traceback as _tb2
-                                    st.warning("Agent 提示词失败: " + str(_agent_err2)[:200])
-                                    st.caption(_tb2.format_exc()[-400:])
-                            prompt = llm.generate_video_prompt(
-                                activity_theme=st.session_state.get("quick_mode_input",""),
-                                video_script=idea.get("description",""),
-                                has_reference=has_ref, ref_description=ref_desc,
-                                style=st.session_state.quick_mode_style, duration=duration, camera_fixed=has_ref)
-                            st.session_state.quick_mode_prompt = prompt
-                            st.rerun()
-                        except Exception as e: st.error("生成提示词失败: "+str(e))
-    with c3:
-        if st.session_state.quick_mode_prompt:
-            if st.button("编辑提示词",use_container_width=True,type="primary"): st.session_state.quick_mode_step="prompt"; st.rerun()
+                                ag_r = _ag.run_agent(system_prompt=sys_p, user_message=f"活动：{st.session_state.get('quick_mode_input','')}\n方案：{idea.get('description','')}\n风格：{st.session_state.quick_mode_style}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS, session_id=st.session_state.get("quick_mode_session_id", ""))
+                                ag_prompt = ag_r.get("answer","").strip()
+                                ev_r = _ev.evaluate_prompt_quality(ag_prompt)
+                                if ag_prompt and len(ag_prompt) > 100:
+                                    st.session_state.quick_mode_prompt = ag_prompt
+                                    st.session_state.quick_mode_prompt_agent_steps = ag_r.get("steps",[])
+                                    st.session_state.quick_mode_evaluation = ev_r
+                                    st.rerun()
+                                else:
+                                    raise ValueError("Agent output too short")
+                            except Exception as _agent_err2:
+                                import traceback as _tb2
+                                st.warning("Agent 提示词失败: " + str(_agent_err2)[:200])
+                                st.caption(_tb2.format_exc()[-400:])
+                        prompt = llm.generate_video_prompt(
+                            activity_theme=st.session_state.get("quick_mode_input",""),
+                            video_script=idea.get("description",""),
+                            has_reference=has_ref, ref_description=ref_desc,
+                            style=st.session_state.quick_mode_style, duration=duration, camera_fixed=has_ref)
+                        st.session_state.quick_mode_prompt = prompt
+                        st.rerun()
+                    except Exception as e: st.error("生成提示词失败: "+str(e))
+    else:
+        st.success(f"提示词已生成（{duration} 秒）")
+        with st.expander("预览", expanded=False): st.code(st.session_state.quick_mode_prompt[:500])
+
     st.divider()
+
+    # --- Row 5: Actions ---
+    c1,c2,c3 = st.columns([1,1,1])
+    with c1:
+        if st.button("返回选创意", use_container_width=True):
+            st.session_state.quick_mode_step = "choose"; st.rerun()
+    with c2:
+        if st.button("编辑提示词", use_container_width=True, type="secondary", disabled=not st.session_state.quick_mode_prompt):
+            st.session_state.quick_mode_step = "prompt"; st.rerun()
+    with c3:
+        if st.button("确认并生成视频", use_container_width=True, type="primary", disabled=not st.session_state.quick_mode_prompt):
+            st.session_state.quick_mode_final_prompt = st.session_state.quick_mode_prompt
+            st.session_state.quick_mode_step = "generating"
+            st.session_state.quick_gen_task_id = None
+            _save_progress("generating_video")
+            st.rerun()
 
 elif st.session_state.quick_mode_step == "prompt":
     if st.session_state.quick_mode_selected>=0:
         idea = st.session_state.quick_mode_ideas[st.session_state.quick_mode_selected]
     if not st.session_state.quick_mode_prompt:
         st.warning("提示词尚未生成，请返回上一步")
-        if st.button("返回"): st.session_state.quick_mode_step="duration"; st.rerun()
+        if st.button("返回"): st.session_state.quick_mode_step="confirm"; st.rerun()
     else:
         # Show Agent reasoning and evaluation
         agent_prompt_steps = st.session_state.get("quick_mode_prompt_agent_steps", [])
@@ -615,7 +607,7 @@ elif st.session_state.quick_mode_step == "prompt":
         edited = st.text_area("提示词",value=st.session_state.quick_mode_prompt,height=350,key="quick_mode_edited_prompt",label_visibility="collapsed")
         c1,c2,c3=st.columns([1,1,1])
         with c1:
-            if st.button("返回",use_container_width=True): st.session_state.quick_mode_step="duration"; st.rerun()
+            if st.button("返回",use_container_width=True): st.session_state.quick_mode_step="confirm"; st.rerun()
         with c2:
             if st.button("重新生成",use_container_width=True): st.session_state.quick_mode_prompt=""; st.rerun()
         with c3:
@@ -690,7 +682,7 @@ elif st.session_state.quick_mode_step == "generating":
                         st.rerun()
                 with c2:
                     if st.button("换风格重新生成", key="gen_restyle"):
-                        st.session_state.quick_mode_step = "style"
+                        st.session_state.quick_mode_step = "confirm"
                         st.session_state.quick_mode_prompt = ""
                         st.session_state.quick_mode_final_prompt = ""
                         st.session_state.quick_gen_task_id = None
@@ -747,7 +739,7 @@ elif st.session_state.quick_mode_step == "feedback":
     st.success(reply)
     
     if action == "restyle":
-        st.session_state.quick_mode_step = "style"
+        st.session_state.quick_mode_step = "confirm"
         st.session_state.quick_mode_prompt = ""
         st.session_state.quick_gen_task_id = None
         st.rerun()
