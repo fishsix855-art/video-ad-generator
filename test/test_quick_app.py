@@ -115,10 +115,11 @@ class TestTools:
 
     def test_tool_definitions(self):
         from app.services import tools
-        assert len(tools.TOOL_DEFINITIONS) == 3
-        assert len(tools.TOOL_HANDLERS) == 3
+        assert len(tools.TOOL_DEFINITIONS) == 10
+        assert len(tools.TOOL_HANDLERS) == 10
         assert "search_relevant_cases" in tools.TOOL_HANDLERS
         assert "evaluate_prompt_quality" in tools.TOOL_HANDLERS
+        assert "evaluate_creative_ideas" in tools.TOOL_HANDLERS
 
 
 class TestSkillManager:
@@ -132,3 +133,45 @@ class TestSkillManager:
         from app.services import skill_manager
         r = skill_manager.render_skill("creative_ideas", activity_theme="测试", extra_context="")
         assert "测试" in r
+
+class TestAgent:
+    def test_agent_no_tools(self):
+        from app.services import agent
+        result = agent.run_agent(
+            system_prompt="You are a helpful assistant.",
+            user_message="Say hello.",
+            tools=[],
+            tool_handlers={},
+            max_steps=2,
+        )
+        assert result["success"] is True
+        assert len(result["answer"]) > 0
+
+    def test_agent_with_tools(self):
+        from app.services import agent
+        from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+        result = agent.run_agent(
+            system_prompt="Search for creative cases using search_relevant_cases, then tell me the result.",
+            user_message="Keywords: telecom",
+            tools=TOOL_DEFINITIONS,
+            tool_handlers=TOOL_HANDLERS,
+            max_steps=3,
+        )
+        assert result["success"] is True
+        assert len(result["steps"]) > 0
+
+class TestJudge:
+    def test_judge_import(self):
+        from app.services import judge
+        assert hasattr(judge, 'judge_creative_ideas')
+        assert hasattr(judge, 'run_full_evaluation')
+
+    def test_guard_import(self):
+        from app.services import guard
+        r = guard.check_safety("Normal safe content")
+        assert r["success"] is True
+
+    def test_guard_sensitive(self):
+        from app.services import guard
+        r = guard.check_safety("This is the best product, 100% guaranteed!")
+        assert len(r["issues"]) > 0

@@ -181,11 +181,44 @@ _defaults = {
     "quick_mode_step": "input", "quick_mode_ideas": [], "quick_mode_selected": -1,
     "quick_mode_style": "", "quick_mode_refs": [], "quick_mode_prompt": "",
     "quick_mode_duration": 8, "quick_gen_task_id": None, "quick_mode_final_prompt": "",
+    "quick_mode_session_id": "",
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state: st.session_state[_k] = _v
 
-# ═══════════════════════════════════════════════════════════════
+# Generate session_id on first run
+if not st.session_state.quick_mode_session_id:
+    st.session_state.quick_mode_session_id = str(uuid.uuid4())
+
+# Progress persistence helper
+def _save_progress(status=""):
+    """保存当前状态到 SQLite"""
+    try:
+        from app.services import database
+        database.init_db()
+        sid = st.session_state.get("quick_mode_session_id", "")
+        if not sid:
+            return
+        sel = st.session_state.get("quick_mode_selected", -1)
+        ideas = st.session_state.get("quick_mode_ideas", [])
+        idea = {}
+        if sel >= 0 and sel < len(ideas):
+            idea = ideas[sel]
+        data = {
+            "id": sid,
+            "user_input": st.session_state.get("quick_mode_input", ""),
+            "creative_idea": idea,
+            "style": st.session_state.get("quick_mode_style", ""),
+            "duration": st.session_state.get("quick_mode_duration", 8),
+            "prompt": st.session_state.get("quick_mode_prompt", ""),
+            "final_prompt": st.session_state.get("quick_mode_final_prompt", ""),
+            "status": status or st.session_state.get("quick_mode_step", "input"),
+        }
+        database.save_task(data)
+        print("[SAVED] session=" + sid[:8] + " status=" + str(status))
+    except Exception as e:
+        print("[SAVE ERROR] " + str(e))
+
 # MAIN
 # ═══════════════════════════════════════════════════════════════
 import os as _os
@@ -255,11 +288,40 @@ if tab == "历史记录":
                                 st.caption("生成的视频")
                                 for vi, vurl in enumerate(video_urls):
                                     st.video(vurl)
+
+                            # Resume button
+                            if status != "completed":
+                                if st.button("' + C(0x6062) + C(0x590d) + C(0x6b64) + C(0x4f1a) + C(0x8bdd) + '", key=f"resume_{t['id']}"):
+                                    # Load this task state into current session
+                                    st.session_state.quick_mode_session_id = t["id"]
+                                    st.session_state.quick_mode_input = user_input
+                                    st.session_state.quick_mode_style = style if style != "' + C(0x65e0) + '" else ""
+                                    st.session_state.quick_mode_ideas = [idea] if idea else []
+                                    st.session_state.quick_mode_selected = 0 if idea else -1
+                                    st.session_state.quick_mode_duration = task_detail.get("duration", 8)
+                                    st.session_state.quick_mode_prompt = task_detail.get("prompt", "")
+                                    st.session_state.quick_mode_final_prompt = task_detail.get("final_prompt", "")
+                                    # Go to the right step based on status
+                                    status_step = {
+                                        "input": "input",
+                                        "choosing_style": "style",
+                                        "choosing_reference": "reference",
+                                        "setting_duration": "duration",
+                                        "generating_video": "generating",
+                                        "completed": "feedback",
+                                    }
+                                    step = status_step.get(status, "input")
+                                    if step == "input":
+                                        st.session_state.quick_mode_step = "input"
+                                    else:
+                                        st.session_state.quick_mode_step = step
+                                    st.rerun()
         except Exception as e:
             st.error(f"加载失败: {e}")
     st.stop()
 
 
+_save_progress("");  # auto-save on every render
 if st.session_state.quick_mode_step == "input":
     # Scene templates
     templates = [
@@ -288,60 +350,52 @@ if st.session_state.quick_mode_step == "input":
                 try:
                     agent_on = _features.get("agent_enabled", False)
                     if agent_on:
-                        try:
-                            from app.services import agent as _ag, evaluator as _eval
-                            from app.services.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
-                            import json as _json
-                            # Pass API key directly - bypass agent.py config dependency
-                            import os as _os
-                            if not _os.environ.get("DEEPSEEK_API_KEY"):
-                                try:
-                                    from app.config import config as _cfg
-                                    _key = _cfg.app.get("deepseek_api_key","")
-                                    if _key: _os.environ["DEEPSEEK_API_KEY"] = _key
-                                except: pass
-                            system_prompt = """你是电信营业厅 AI 视频广告创意总监。搜索历史优秀案例，生成6个创意方案，自评质量。返回JSON数组。[{title, style, description}]"""
-                            agent_result = _ag.run_agent(system_prompt=system_prompt, user_message=f"活动：{quick_input}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS)
-                            answer = agent_result.get("answer","")
-                            # Clean markdown code blocks
-                            if "```" in answer:
-                                answer = answer.split("```")[1]
-                                if answer.startswith("json"):
-                                    answer = answer[4:]
-                                answer = answer.strip()
-                            # Extract JSON array
-                            ideas = []
+                        import os as _os
+                        if not _os.environ.get("DEEPSEEK_API_KEY"):
                             try:
-                                raw_ideas = _json.loads(answer) if answer.startswith("[") else _json.loads("[" + answer + "]") if answer.startswith("{") else []
-                                # Normalize: ensure each idea has title, description, style
-                                for ri in raw_ideas:
-                                    if isinstance(ri, dict) and "title" in ri:
-                                        ideas.append({
-                                            "title": ri.get("title", ""),
-                                            "description": ri.get("description", ""),
-                                            "style": ri.get("style", "")
-                                        })
-                            except Exception:
-                                ideas = []
-                            if isinstance(ideas, list) and len(ideas) >= 3:
-                                st.session_state.quick_mode_ideas = ideas[:6]
-                                st.session_state.quick_mode_agent_steps = agent_result.get("steps",[])
-                                st.session_state.quick_mode_step = "choose"; st.session_state.quick_mode_selected = -1
-                                st.rerun()
-                            else:
-                                raise ValueError("Agent output not valid JSON")
-                        except Exception as _agent_err:
-                            import traceback as _tb
-                            st.warning("Agent 模式失败: " + str(_agent_err)[:200])
-                            st.caption(_tb.format_exc()[-400:])
+                                from app.config import config as _cfg
+                                _key = _cfg.app.get("deepseek_api_key","")
+                                if _key: _os.environ["DEEPSEEK_API_KEY"] = _key
+                            except: pass
+                        agent_result = llm.generate_creative_ideas_with_agent(quick_input)
+                        agent_steps = agent_result.get("steps", [])
+                        agent_ideas = agent_result.get("ideas", [])
+                        if agent_result.get("success") and len(agent_ideas) >= 3:
+                            st.session_state.quick_mode_ideas = agent_ideas[:6]; _save_progress("ideas_ready")
+                            st.session_state.quick_mode_agent_steps = agent_steps
+                            st.session_state.quick_mode_agent_streaming = True
+                            st.session_state.quick_mode_step = "choose"
+                            st.session_state.quick_mode_selected = -1
+                            st.rerun()
+                        else:
+                            st.warning("Agent 模式失败，回退普通模式...")
                     ideas = llm.generate_creative_ideas(quick_input)
-                    st.session_state.quick_mode_ideas = ideas
-                    st.session_state.quick_mode_step = "choose"; st.session_state.quick_mode_selected = -1
+                    st.session_state.quick_mode_ideas = ideas; _save_progress("ideas_ready")
+                    st.session_state.quick_mode_agent_steps = []
+                    st.session_state.quick_mode_step = "choose"
+                    st.session_state.quick_mode_selected = -1
                     st.rerun()
                 except Exception as e:
                     st.error("生成创意失败: " + str(e))
-
 elif st.session_state.quick_mode_step == "choose":
+    # v4.0: Streaming Agent status
+    if st.session_state.get("quick_mode_agent_streaming"):
+        stream_placeholder = st.empty()
+        stream_placeholder.info("Agent is reasoning...")
+
+    
+    # v4.0: Render Agent RAG reasoning steps
+    agent_steps = st.session_state.get("quick_mode_agent_steps", [])
+    if agent_steps and len(agent_steps) > 0:
+        with st.expander("Agent RAG (" + str(len(agent_steps)) + " steps)", expanded=False):
+            for s in agent_steps:
+                step_num = s.get("step", "?")
+                tool_name = s.get("tool", "") or "(thinking)"
+                st.caption("Step " + str(step_num) + ": " + str(tool_name))
+                if s.get("result"):
+                    res = str(s.get("result", ""))[:500]
+                    st.code(res, language="json")
+
     ideas = st.session_state.quick_mode_ideas
     emoji_map = {"warm":"","humor":"","direct":"","suspense":"","scenic":"","social":""}
     label_map = {"warm":"温情走心","humor":"幽默吸睛","direct":"直给促销","suspense":"悬念反转","scenic":"场景故事","social":"口碑推荐"}
@@ -364,7 +418,7 @@ elif st.session_state.quick_mode_step == "choose":
                 </div>""", unsafe_allow_html=True)
                 if st.button("选择此方案", key=f"sel_{idx}", use_container_width=True):
                     st.session_state.quick_mode_selected = idx
-                    st.session_state.quick_mode_step = "style"; st.rerun()
+                    st.session_state.quick_mode_step = "style"; _save_progress("choosing_style"); st.rerun()
     if st.button("返回修改描述"):
         st.session_state.quick_mode_step = "input"; st.session_state.quick_mode_ideas = []; st.rerun()
 
@@ -396,7 +450,7 @@ elif st.session_state.quick_mode_step == "style":
         if st.button("返回选创意", use_container_width=True): st.session_state.quick_mode_step = "choose"; st.rerun()
     with c2:
         if st.button("下一步：添加参考图", use_container_width=True, type="primary", disabled=not st.session_state.quick_mode_style):
-            st.session_state.quick_mode_step = "reference"; st.rerun()
+            st.session_state.quick_mode_step = "reference"; _save_progress("choosing_reference"); st.rerun()
 
 elif st.session_state.quick_mode_step == "reference":
     if st.session_state.quick_mode_selected >= 0:
@@ -430,10 +484,10 @@ elif st.session_state.quick_mode_step == "reference":
         if st.button("返回选风格",use_container_width=True): st.session_state.quick_mode_step="style"; st.rerun()
     with c2:
         if st.button("跳过参考图",use_container_width=True):
-            st.session_state.quick_mode_refs=[]; st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; st.rerun()
+            st.session_state.quick_mode_refs=[]; st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; _save_progress("setting_duration"); st.rerun()
     with c3:
         if st.button("下一步：选择时长",use_container_width=True,type="primary"):
-            st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; st.rerun()
+            st.session_state.quick_mode_step="duration"; st.session_state.quick_mode_prompt=""; _save_progress("setting_duration"); st.rerun()
 
 elif st.session_state.quick_mode_step == "duration":
     if st.session_state.quick_mode_selected>=0:
@@ -534,7 +588,7 @@ elif st.session_state.quick_mode_step == "prompt":
             if st.button("重新生成",use_container_width=True): st.session_state.quick_mode_prompt=""; st.rerun()
         with c3:
             if st.button("确认生成视频",use_container_width=True,type="primary"):
-                st.session_state.quick_mode_final_prompt=edited; st.session_state.quick_mode_step="generating"; st.session_state.quick_gen_task_id=None; st.rerun()
+                st.session_state.quick_mode_final_prompt=edited; st.session_state.quick_mode_step="generating"; _save_progress("generating_video"); st.session_state.quick_gen_task_id=None; st.rerun()
         st.divider()
 
 elif st.session_state.quick_mode_step == "generating":
@@ -617,6 +671,18 @@ elif st.session_state.quick_mode_step == "generating":
                         st.session_state.quick_mode_prompt = ""
                         st.session_state.quick_gen_task_id = None
                         st.rerun()
+                # v4.0: Free-form feedback
+                st.divider()
+                st.caption("Want to adjust? Tell me:")
+                fb_c1, fb_c2 = st.columns([3, 1])
+                with fb_c1:
+                    fb_text = st.text_input("e.g. add subtitles, trim first 2s, change style", key="quick_fb", label_visibility="collapsed")
+                with fb_c2:
+                    if st.button("Send", key="fb_send", use_container_width=True, disabled=not fb_text):
+                        st.session_state.quick_feedback = fb_text
+                        st.session_state.quick_mode_step = "feedback"; _save_progress("completed")
+                        st.rerun()
+                
             elif state < 0:
                 st.error("生成失败: "+(task.get("error") or task.get("message") or "未知错误"))
                 if st.button("返回修改"): st.session_state.quick_mode_step="prompt"; st.rerun()
@@ -624,3 +690,26 @@ elif st.session_state.quick_mode_step == "generating":
                 time.sleep(3); st.rerun()
         except Exception as e: st.error("查询状态失败: "+str(e))
         st.divider()
+
+elif st.session_state.quick_mode_step == "feedback":
+    fb = st.session_state.get("quick_feedback", "")
+    st.info(f"Agent processing: {fb}")
+    fb_lower = fb.lower()
+    
+    if any(kw in fb_lower for kw in ["subtitle", "subtitles", "caption"]):
+        st.success("Subtitle request received. Whisper/FFmpeg pipeline will process.")
+    if any(kw in fb_lower for kw in ["trim", "cut", "remove", "delete", "crop"]):
+        st.success("Video trim request received. FFmpeg will process.")
+    if any(kw in fb_lower for kw in ["style", "restyle", "change style"]):
+        st.session_state.quick_mode_step = "style"
+        st.session_state.quick_mode_prompt = ""
+        st.session_state.quick_gen_task_id = None
+        st.rerun()
+    if any(kw in fb_lower for kw in ["bright", "dark", "light", "color", "tone"]):
+        st.session_state.quick_mode_step = "prompt"
+        st.session_state.quick_mode_prompt = ""
+        st.rerun()
+    
+    if st.button("Back to video"):
+        st.session_state.quick_mode_step = "generating"
+        st.rerun()

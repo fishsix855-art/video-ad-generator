@@ -616,6 +616,7 @@ def generate_creative_ideas_with_agent(video_subject: str, language: str = "zh-C
         user_message=user_message,
         tools=TOOL_DEFINITIONS,
         tool_handlers=TOOL_HANDLERS,
+        max_steps=10,
     )
     
     # Try to parse the answer as JSON
@@ -716,6 +717,7 @@ def generate_video_prompt_with_agent(
         user_message=user_message,
         tools=TOOL_DEFINITIONS,
         tool_handlers=TOOL_HANDLERS,
+        max_steps=10,
     )
     
     answer = result.get("answer", "").strip()

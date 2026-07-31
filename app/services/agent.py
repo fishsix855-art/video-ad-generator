@@ -9,8 +9,56 @@ from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 5
+MAX_STEPS = 10
 TIMEOUT = 30
+# Tools that should pause the agent for user input
+INTERRUPT_TOOLS = {"generate_creative_ideas"}
+
+# State persistence
+def save_agent_state(session_id: str, state: dict):
+    """Save agent state to database for later resume."""
+    try:
+        from app.services import database
+        import json as _json
+        database.save_task({
+            "id": session_id,
+            "user_input": state.get("user_message", ""),
+            "style": state.get("style", ""),
+            "duration": state.get("duration", 8),
+            "prompt": "",
+            "final_prompt": "",
+            "status": "waiting_user",
+            "task_data": _json.dumps({
+                "agent_state": {
+                    "messages": state.get("messages", []),
+                    "step": state.get("step", 0),
+                    "tools": state.get("tools", []),
+                    "tool_handlers": list(state.get("tool_handlers", {}).keys()),
+                }
+            }, ensure_ascii=False),
+        })
+        return True
+    except Exception:
+        return False
+
+
+def load_agent_state(session_id: str) -> dict | None:
+    """Load agent state from database for resume."""
+    try:
+        from app.services import database
+        import json as _json
+        task = database.get_task(session_id)
+        if not task:
+            return None
+        td = task.get("task_data", {})
+        if isinstance(td, str):
+            td = _json.loads(td)
+        agent_state = td.get("agent_state", {})
+        return agent_state if agent_state.get("messages") else None
+    except Exception:
+        return None
+
+
 
 
 def _get_deepseek_client():
@@ -45,6 +93,9 @@ def run_agent(
     tools: list[dict],
     tool_handlers: dict,
     max_steps: int = None,
+    stream_callback: callable = None,
+    session_id: str = "",
+    resume_from: dict = None,
 ) -> dict:
     """
     运行 Agent 循环。
@@ -69,7 +120,14 @@ def run_agent(
     ]
     steps = []
     
-    for step_num in range(1, max_steps + 1):
+    # Resume from saved state if provided
+    start_step = 1
+    if resume_from and resume_from.get("messages"):
+        messages = resume_from["messages"]
+        start_step = resume_from.get("step", 1)
+        logger.info(f"Resuming agent from step {start_step}")
+    
+    for step_num in range(start_step, max_steps + 1):
         step_record = {"step": step_num, "tool": None, "input": None, "result": None}
         
         try:
@@ -115,6 +173,10 @@ def run_agent(
             step_record["tool"] = tool_name
             step_record["input"] = tc.function.arguments[:300]
             
+            # Notify stream callback
+            if stream_callback:
+                stream_callback({"type": "tool_start", "tool": tool_name, "step": step_num})
+            
             handler = tool_handlers.get(tool_name)
             if not handler:
                 tool_result = {"success": False, "error": f"Unknown tool: {tool_name}"}
@@ -128,6 +190,30 @@ def run_agent(
                     tool_result = {"success": False, "error": str(e)}
             
             step_record["result"] = json.dumps(tool_result, ensure_ascii=False)[:500]
+            
+            # Check if this tool requires user interaction (interrupt)
+            if tool_name in INTERRUPT_TOOLS and tool_result.get("status") == "needs_user_choice":
+                if session_id:
+                    save_agent_state(session_id, {
+                        "messages": messages,
+                        "step": step_num,
+                        "tools": tools,
+                        "tool_handlers": tool_handlers,
+                        "user_message": user_message,
+                    })
+                return {
+                    "answer": tool_result.get("message", "Agent paused"),
+                    "steps": steps,
+                    "success": True,
+                    "status": "waiting_user",
+                    "options": tool_result.get("options", []),
+                    "session_id": session_id,
+                }
+            
+            # Notify stream callback
+            if stream_callback:
+                stream_callback({"type": "tool_done", "tool": tool_name, "step": step_num, "result": str(tool_result)[:200]})
+            
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
