@@ -367,12 +367,27 @@ if st.session_state.quick_mode_step == "input":
                                 _key = _cfg.app.get("deepseek_api_key","")
                                 if _key: _os.environ["DEEPSEEK_API_KEY"] = _key
                             except: pass
-                        agent_result = llm.generate_creative_ideas_with_agent(quick_input)
+                        _stream_events = []
+                        def _on_agent_event(ev):
+                            _stream_events.append(ev)
+                        sid = st.session_state.get("quick_mode_session_id", str(uuid.uuid4()))
+                        st.session_state.quick_mode_session_id = sid
+                        agent_result = llm.generate_creative_ideas_with_agent(quick_input, session_id=sid, stream_callback=_on_agent_event)
                         agent_steps = agent_result.get("steps", [])
                         agent_ideas = agent_result.get("ideas", [])
+                        # v4.0: handle waiting_user interrupt from Agent
+                        if agent_result.get("status") == "waiting_user":
+                            st.session_state.quick_mode_ideas = agent_result.get("options", [])
+                            st.session_state.quick_mode_agent_steps = agent_steps
+                            st.session_state.quick_mode_agent_stream_events = _stream_events
+                            _save_progress("ideas_ready")
+                            st.session_state.quick_mode_step = "choose"
+                            st.session_state.quick_mode_selected = -1
+                            st.rerun()
                         if agent_result.get("success") and len(agent_ideas) >= 3:
                             st.session_state.quick_mode_ideas = agent_ideas[:6]; _save_progress("ideas_ready")
                             st.session_state.quick_mode_agent_steps = agent_steps
+                            st.session_state.quick_mode_agent_stream_events = _stream_events
                             st.session_state.quick_mode_agent_streaming = True
                             st.session_state.quick_mode_step = "choose"
                             st.session_state.quick_mode_selected = -1
@@ -389,9 +404,16 @@ if st.session_state.quick_mode_step == "input":
                     st.error("生成创意失败: " + str(e))
 elif st.session_state.quick_mode_step == "choose":
     # v4.0: Streaming Agent status
-    if st.session_state.get("quick_mode_agent_streaming"):
-        stream_placeholder = st.empty()
-        stream_placeholder.info("Agent is reasoning...")
+    # v4.0: Live Agent Streaming Panel
+    stream_events = st.session_state.get("quick_mode_agent_stream_events", [])
+    if stream_events and len(stream_events) > 0:
+        with st.status("Agent real-time reasoning", expanded=True) as agent_status:
+            for ev in stream_events:
+                if ev.get("type") == "tool_start":
+                    st.write("[TOOL] Calling " + str(ev.get("tool", "")) + "...")
+                elif ev.get("type") == "tool_done":
+                    st.write("[DONE] " + str(ev.get("tool", "")) + " completed")
+            agent_status.update(label="Reasoning complete", state="complete")
 
     
     # v4.0: Render Agent RAG reasoning steps
@@ -537,7 +559,7 @@ elif st.session_state.quick_mode_step == "duration":
 检索历史案例，生成分镜提示词，自评质量。{ref_rule} 机位：{cam_rule}
 输出：【场景总描述】【视频总时长：{duration}秒，9:16竖屏】【时间分段动作脚本】【画质收尾】
 要求：至少4个时间切片，不少于300字，高清，画面稳定，无肢体畸形"""
-                                    ag_r = _ag.run_agent(system_prompt=sys_p, user_message=f"活动：{st.session_state.get('quick_mode_input','')}\n方案：{idea.get('description','')}\n风格：{st.session_state.quick_mode_style}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS)
+                                    ag_r = _ag.run_agent(system_prompt=sys_p, user_message=f"活动：{st.session_state.get('quick_mode_input','')}\n方案：{idea.get('description','')}\n风格：{st.session_state.quick_mode_style}", tools=TOOL_DEFINITIONS, tool_handlers=TOOL_HANDLERS, session_id=st.session_state.get("quick_mode_session_id", ""))
                                     ag_prompt = ag_r.get("answer","").strip()
                                     ev_r = _ev.evaluate_prompt_quality(ag_prompt)
                                     if ag_prompt and len(ag_prompt) > 100:

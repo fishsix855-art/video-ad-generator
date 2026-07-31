@@ -580,7 +580,7 @@ def generate_video_prompt(
         raise ValueError(response.removeprefix("Error:").strip())
     return response.strip()
 
-def generate_creative_ideas_with_agent(video_subject: str, language: str = "zh-CN") -> dict:
+def generate_creative_ideas_with_agent(video_subject: str, language: str = "zh-CN", session_id: str = "", stream_callback: callable = None) -> dict:
     """
     Agent 增强版创意方案生成。
     利用 Agent 多步推理：分析关键词 → 检索历史案例 → 生成 → 自评 → 重试。
@@ -617,6 +617,8 @@ def generate_creative_ideas_with_agent(video_subject: str, language: str = "zh-C
         tools=TOOL_DEFINITIONS,
         tool_handlers=TOOL_HANDLERS,
         max_steps=10,
+        session_id=session_id,
+        stream_callback=stream_callback,
     )
     
     # Try to parse the answer as JSON
@@ -718,6 +720,8 @@ def generate_video_prompt_with_agent(
         tools=TOOL_DEFINITIONS,
         tool_handlers=TOOL_HANDLERS,
         max_steps=10,
+        session_id=session_id,
+        stream_callback=stream_callback,
     )
     
     answer = result.get("answer", "").strip()
