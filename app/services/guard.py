@@ -1,6 +1,6 @@
 ﻿import re
 
-SENSITIVE_KEYWORDS = ['best', 'first', 'only', '100%', 'absolute']
+SENSITIVE_KEYWORDS = ['best', 'first', 'only', '100%', 'absolute', '最好', '第一', '唯一', '100%', '绝对', '免费送', '白送', '零元购', '永久免费', '全网最低']
 COMPLIANCE_CHECKS = [(r'unlimited.*data', 'Check: unlimited claims')]
 
 def check_safety(content):

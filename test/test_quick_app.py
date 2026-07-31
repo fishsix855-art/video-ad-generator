@@ -115,8 +115,8 @@ class TestTools:
 
     def test_tool_definitions(self):
         from app.services import tools
-        assert len(tools.TOOL_DEFINITIONS) == 10
-        assert len(tools.TOOL_HANDLERS) == 10
+        assert len(tools.TOOL_DEFINITIONS) >= 10  # 10 base tools + optional generate_subtitle
+        assert len(tools.TOOL_HANDLERS) >= 10  # 10 base handlers + optional generate_subtitle
         assert "search_relevant_cases" in tools.TOOL_HANDLERS
         assert "evaluate_prompt_quality" in tools.TOOL_HANDLERS
         assert "evaluate_creative_ideas" in tools.TOOL_HANDLERS

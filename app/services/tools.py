@@ -201,6 +201,20 @@ def add_subtitle(video_path: str, srt_path: str, output_path: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+
+# ============================================================
+# Tool 11: Generate Subtitle (Whisper)
+# ============================================================
+def generate_subtitle(video_path: str, output_srt: str = "", language: str = "zh") -> dict:
+    """Generate SRT subtitle from video audio using faster-whisper speech recognition."""
+    try:
+        from app.services.subtitle_generator import generate_srt
+        srt_out = output_srt if output_srt else ""
+        result = generate_srt(video_path, srt_out, language)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # ============================================================
 # TOOL_DEFINITIONS - Schema for LLM Function Calling
 # ============================================================
@@ -349,8 +363,24 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "generate_subtitle",
+            "description": "Generate SRT subtitle file from video/audio using faster-whisper speech recognition. Call this BEFORE add_subtitle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "video_path": {"type": "string", "description": "Input video or audio file path"},
+                    "output_srt": {"type": "string", "description": "Output SRT path (auto-generated if empty)"},
+                    "language": {"type": "string", "description": "Language code, e.g. zh, en. Default: zh"}
+                },
+                "required": ["video_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_subtitle",
-            "description": "Overlay SRT subtitle file onto video (FFmpeg subtitles filter).",
+            "description": "Overlay SRT subtitle file onto video (FFmpeg subtitles filter). Call generate_subtitle first to get SRT.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -379,4 +409,5 @@ TOOL_HANDLERS = {
     "trim_video": trim_video,
     "concat_videos": concat_videos,
     "add_subtitle": add_subtitle,
+    "generate_subtitle": generate_subtitle,
 }
