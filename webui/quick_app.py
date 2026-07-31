@@ -44,11 +44,10 @@ st.markdown("""
 <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header[data-testid="stHeader"] {background: transparent !important;}
 
-    .stApp { background: linear-gradient(180deg, #fafbfc 0%, #f0f2f5 100%); }
+    .stApp { background: #f8fafc; }
 
-    .stApp, .stApp h2, .stApp h3, .stApp h4,
-    .stApp p, .stApp span, .stApp label, .stApp div,
-    .stApp .stMarkdown, .stApp .stCaption { color: #1e293b !important; }
+    .stApp h1, .stApp h2, .stApp h3 { color: #0f172a; }
+    .stApp p, .stApp span, .stApp label, .stApp .stMarkdown, .stApp .stCaption { color: #334155; }
 
     /* Logo reveal */
     @keyframes logoReveal {
@@ -68,7 +67,7 @@ st.markdown("""
 
     /* Primary button */
     .stButton > button {
-        background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%) !important;
+        background: #2563eb !important;
         color: #fff !important; border: none !important;
         border-radius: 10px !important; font-weight: 600 !important;
         font-size: 0.875rem !important; padding: 0.55rem 1.2rem !important;
@@ -106,7 +105,7 @@ st.markdown("""
         border: 1px solid rgba(0,0,0,0.08) !important; border-radius: 10px !important;
     }
 
-    .stProgress > div > div > div { background: linear-gradient(90deg, #2563eb, #3b82f6) !important; }
+    .stProgress > div > div > div { background: #2563eb !important; }
     .stAlert { border-radius: 12px !important; box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important; }
     hr { border-color: rgba(0,0,0,0.06) !important; }
     .stCodeBlock { background: #f1f5f9 !important; border: 1px solid rgba(0,0,0,0.06) !important; border-radius: 10px !important; }
@@ -163,14 +162,11 @@ st.markdown("""
 # ═══════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="hero-blob" style="width:420px;height:420px;background:#2563eb;top:-120px;right:-100px;"></div>
-<div class="hero-blob" style="width:320px;height:320px;background:#3b82f6;bottom:-100px;left:-80px;animation-delay:-9s;"></div>
-<div class="hero-blob" style="width:260px;height:260px;background:#6366f1;top:45%;left:55%;animation-delay:-16s;"></div>
-
 <div class="logo-reveal" style="text-align:center;padding:40px 0 12px 0;position:relative;z-index:1">
-    <div style="display:inline-block;background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;width:56px;height:56px;border-radius:15px;line-height:56px;font-size:28px;font-weight:800;box-shadow:0 6px 24px rgba(37,99,235,0.3);margin-bottom:4px">T</div>
+    <div style="display:inline-block;background:#2563eb;color:#fff;width:56px;height:56px;border-radius:15px;line-height:56px;font-size:28px;font-weight:800;box-shadow:0 6px 24px rgba(37,99,235,0.3);margin-bottom:4px">T</div>
     <div style="font-size:0.7rem;color:#94a3b8;letter-spacing:0.2em;margin-bottom:8px;margin-top:6px">TELECOM VIDEO</div>
-    <h1 style="font-size:1.9rem;font-weight:700;color:#0f172a;margin:0;letter-spacing:-0.03em;line-height:1.2">视频广告生成器</h1>
-    <p style="color:#64748b;font-size:0.85rem;margin-top:4px;font-weight:400">输入活动描述，AI 自动生成创意方案与视频</p>
+    <h1 style="font-size:1.9rem;font-weight:700;color:#0f172a;margin:0;letter-spacing:-0.03em;line-height:1.2">AI 视频广告生成器</h1>
+    <p style="color:#64748b;font-size:0.85rem;margin-top:4px;font-weight:400">输入活动主题， AI 自动生成创意方案与视频</p>
 </div>
 """, unsafe_allow_html=True)
 
