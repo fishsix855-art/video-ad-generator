@@ -322,6 +322,20 @@ if tab == "历史记录":
 
 
 _save_progress("");  # auto-save on every render
+_steps_order = ["input", "choose", "style", "reference", "duration", "prompt", "generating", "feedback"]
+_step_labels = ["输入", "选方案", "选风格", "参考图", "时长", "提示词", "生成", "完成"]
+_cur = _steps_order.index(st.session_state.quick_mode_step) if st.session_state.quick_mode_step in _steps_order else 0
+_html = '<div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">'
+for _si, _sl in enumerate(_step_labels):
+    if _si < _cur:
+        _html += f'<span style="background:#10b981;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;opacity:0.6">✓ {_sl}</span>'
+    elif _si == _cur:
+        _html += f'<span style="background:#6366f1;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700">{_sl}</span>'
+    else:
+        _html += f'<span style="background:#e2e8f0;color:#94a3b8;padding:4px 10px;border-radius:12px;font-size:11px">{_sl}</span>'
+_html += '</div>'
+st.markdown(_html, unsafe_allow_html=True)
+
 if st.session_state.quick_mode_step == "input":
     # Scene templates
     templates = [
